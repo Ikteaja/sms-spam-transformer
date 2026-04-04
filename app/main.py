@@ -1,17 +1,21 @@
 """
-Phase 8 — FastAPI inference server.
+Phase 8 — FastAPI inference server + Gradio UI.
 
 Endpoints:
   POST /predict          → classify a single SMS message
   POST /predict/batch    → classify up to 32 messages at once
   GET  /health           → liveness check
+  GET  /ui               → Gradio chat-style interface
   GET  /docs             → auto-generated Swagger UI (built-in)
 
 Run:
   uvicorn app.main:app --reload
+  → API:     http://localhost:8000/docs
+  → UI:      http://localhost:8000/ui
+  → Health:  http://localhost:8000/health
 
-The server loads the best model at startup (frozen > best fallback).
-Model path can be overridden with env var MODEL_DIR.
+Model path priority: $MODEL_DIR env var → models/frozen → models/best
+  → falls back to distilbert-base-uncased (HuggingFace hub) if none found
 """
 
 import os
@@ -19,6 +23,7 @@ import time
 from pathlib import Path
 from typing import List
 
+import gradio as gr
 import numpy as np
 import torch
 from fastapi import FastAPI, HTTPException
@@ -29,6 +34,7 @@ from transformers import DistilBertForSequenceClassification, DistilBertTokenize
 # Config
 # ---------------------------------------------------------------------------
 _DEFAULT_MODEL_DIRS = [Path("models/frozen"), Path("models/best")]
+_FALLBACK_CHECKPOINT = "distilbert-base-uncased"
 MODEL_DIR = Path(os.getenv("MODEL_DIR", ""))
 
 LABEL_MAP = {0: "ham", 1: "spam"}
@@ -59,16 +65,27 @@ def load_model():
 
     candidates = ([MODEL_DIR] if MODEL_DIR.name else []) + _DEFAULT_MODEL_DIRS
     chosen = next((p for p in candidates if p.exists()), None)
-    if chosen is None:
-        raise RuntimeError(
-            "No trained model found. Run 04_train.py (and optionally 06_freeze_tune.py) first."
-        )
+    checkpoint = str(chosen) if chosen else _FALLBACK_CHECKPOINT
+    _model_path = checkpoint
 
-    _model_path = str(chosen)
-    _tokenizer = DistilBertTokenizerFast.from_pretrained(_model_path)
-    _model = DistilBertForSequenceClassification.from_pretrained(_model_path)
+    _tokenizer = DistilBertTokenizerFast.from_pretrained(checkpoint)
+    _model = DistilBertForSequenceClassification.from_pretrained(
+        checkpoint, num_labels=2
+    )
     _model.eval()
-    print(f"Model loaded from: {_model_path}")
+    src = "fine-tuned" if chosen else "HuggingFace hub (no local model found)"
+    print(f"Model loaded from: {_model_path}  [{src}]")
+
+
+# ---------------------------------------------------------------------------
+# Mount Gradio UI at /ui
+# ---------------------------------------------------------------------------
+def _build_gradio():
+    from app.ui import build_interface
+    return build_interface()
+
+
+gr.mount_gradio_app(app, _build_gradio(), path="/ui")
 
 
 # ---------------------------------------------------------------------------
