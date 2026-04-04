@@ -1,0 +1,12 @@
+venv/
+.git/
+.github/
+mlruns/
+data/
+models/
+__pycache__/
+*.pyc
+*.ipynb
+tests/
+*.md
+Makefile

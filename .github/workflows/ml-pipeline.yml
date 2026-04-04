@@ -1,0 +1,465 @@
+###############################################################################
+# SMS Spam Transformer — ML CI/CD Pipeline
+#
+# Trigger : Pull Request → main  (from any feature branch)
+# Registry: ghcr.io/ikteaja/sms-spam-transformer
+#
+# Jobs (run in order):
+#   1. lint            → flake8 + black
+#   2. security-deps   → pip-audit (Python dependency CVEs)
+#   3. test            → pytest unit + smoke tests
+#   4. data-pipeline   → download + quality check + tokenise
+#   5. train           → fine-tune DistilBERT (smoke: 1 epoch)
+#   6. evaluate        → assert F1 >= threshold
+#   7. build-image     → Docker build, push to ghcr.io
+#   8. scan-image      → Trivy (container CVEs + secrets)
+#   9. sbom            → Syft SBOM (SPDX-JSON)
+#  10. sign-image      → Cosign keyless signing (Sigstore)
+###############################################################################
+
+name: ML Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "*.md"
+      - "*.ipynb"
+
+env:
+  REGISTRY:   ghcr.io
+  IMAGE_NAME: ghcr.io/ikteaja/sms-spam-transformer
+  PYTHON_VER: "3.11"
+  F1_THRESHOLD: "0.90"   # CI fails if model F1 drops below this
+
+permissions:
+  contents:      read
+  packages:      write   # push to ghcr.io
+  id-token:      write   # Cosign keyless signing
+  security-events: write # upload Trivy SARIF to GitHub Security tab
+
+###############################################################################
+# Job 1 — Lint
+###############################################################################
+jobs:
+  lint:
+    name: "1 · Lint (flake8 + black)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VER }}
+          cache: pip
+
+      - name: Install linters
+        run: pip install flake8 black
+
+      - name: flake8
+        run: flake8 app/ scripts/ tests/ --max-line-length=100 --ignore=E501,W503,E203
+
+      - name: black (check only)
+        run: black --check app/ scripts/ tests/ --line-length=100
+
+###############################################################################
+# Job 2 — Dependency security scan
+###############################################################################
+  security-deps:
+    name: "2 · Security — pip-audit (dependency CVEs)"
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VER }}
+          cache: pip
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        # --ignore-vuln: ignore known false positives for torch wheel metadata
+        run: |
+          pip install -r requirements.txt --quiet
+          pip-audit --requirement requirements.txt \
+            --format json \
+            --output pip-audit-report.json \
+            || true   # non-zero exit if vulns found — captured in report
+
+      - name: Check for HIGH/CRITICAL CVEs
+        run: |
+          python -c "
+          import json, sys
+          with open('pip-audit-report.json') as f:
+              report = json.load(f)
+          vulns = [v for dep in report.get('dependencies', [])
+                   for v in dep.get('vulns', [])]
+          critical = [v for v in vulns if v.get('fix_versions')]
+          if critical:
+              print(f'FAIL: {len(critical)} fixable vulnerabilities found')
+              for v in critical[:5]:
+                  print(f'  {v[\"id\"]}: {v[\"description\"][:80]}')
+              sys.exit(1)
+          print(f'pip-audit: OK ({len(vulns)} unfixable advisories, 0 with patches)')
+          "
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+
+###############################################################################
+# Job 3 — Unit & smoke tests
+###############################################################################
+  test:
+    name: "3 · Tests (pytest)"
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VER }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt --quiet
+          pip install gradio>=4.0.0 pytest pytest-cov --quiet
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v --tb=short \
+            --cov=app --cov-report=xml \
+            --ignore=tests/test_pipeline.py   # pipeline tests need real data
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+###############################################################################
+# Job 4 — Data pipeline
+###############################################################################
+  data-pipeline:
+    name: "4 · Data — download + quality check + tokenise"
+    runs-on: ubuntu-latest
+    needs: [security-deps, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VER }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt --quiet
+
+      - name: Cache raw data
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: sms-raw-data-v1
+
+      - name: Download dataset
+        run: python scripts/01_download_data.py
+
+      - name: Data quality check
+        run: |
+          python -c "
+          import pandas as pd, sys
+          df = pd.read_csv('data/raw/spam.csv', encoding='latin-1')
+          if 'v1' in df.columns:
+              df = df[['v1','v2']].rename(columns={'v1':'label','v2':'text'})
+          df['label'] = df['label'].str.strip().str.lower()
+          assert df.isnull().sum().sum() == 0, 'FAIL: null values'
+          assert set(df.label.unique()) == {'ham','spam'}, 'FAIL: invalid labels'
+          assert len(df) >= 5000, 'FAIL: too few rows'
+          print(f'Quality OK — {len(df)} rows, spam={( df.label==\"spam\").sum()}')
+          "
+
+      - name: Tokenise (70/15/15 split)
+        run: python scripts/03_tokenise.py
+
+      - name: Upload processed dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: processed-dataset
+          path: data/processed/
+          retention-days: 1
+
+###############################################################################
+# Job 5 — Train (smoke: 1 epoch, small batch)
+###############################################################################
+  train:
+    name: "5 · Train — DistilBERT fine-tune (CI smoke)"
+    runs-on: ubuntu-latest
+    needs: data-pipeline
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VER }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt --quiet
+
+      - name: Download processed dataset artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: processed-dataset
+          path: data/processed/
+
+      - name: Train (1 epoch smoke test)
+        run: |
+          python scripts/04_train.py --epochs 1 --batch_size 16
+        env:
+          TOKENIZERS_PARALLELISM: "false"
+
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: models/best/
+          retention-days: 1
+
+###############################################################################
+# Job 6 — Evaluate (gate on F1 threshold)
+###############################################################################
+  evaluate:
+    name: "6 · Evaluate — assert F1 >= ${{ env.F1_THRESHOLD }}"
+    runs-on: ubuntu-latest
+    needs: train
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VER }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt --quiet
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: processed-dataset
+          path: data/processed/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: models/best/
+
+      - name: Evaluate and enforce threshold
+        run: |
+          python -c "
+          import numpy as np, json, sys
+          from pathlib import Path
+          from datasets import load_from_disk
+          from sklearn.metrics import f1_score
+          from transformers import (DistilBertForSequenceClassification,
+                                    DistilBertTokenizerFast, Trainer, TrainingArguments)
+
+          ds  = load_from_disk('data/processed')
+          ds.set_format('torch', columns=['input_ids','attention_mask','labels'])
+          model = DistilBertForSequenceClassification.from_pretrained('models/best')
+          tok   = DistilBertTokenizerFast.from_pretrained('models/best')
+          trainer = Trainer(model=model,
+                            args=TrainingArguments(output_dir='models/eval_ci',
+                                                   per_device_eval_batch_size=32,
+                                                   report_to='none'))
+          preds  = trainer.predict(ds['val'])
+          y_pred = np.argmax(preds.predictions, axis=-1)
+          y_true = preds.label_ids
+          f1     = f1_score(y_true, y_pred, average='binary')
+          threshold = float('${{ env.F1_THRESHOLD }}')
+          print(f'Validation F1: {f1:.4f}  (threshold: {threshold})')
+          if f1 < threshold:
+              print(f'FAIL: F1 {f1:.4f} < {threshold}')
+              sys.exit(1)
+          print('PASS')
+          # Write metrics for summary
+          Path('eval_metrics.json').write_text(json.dumps({'f1': f1}))
+          "
+        env:
+          TOKENIZERS_PARALLELISM: "false"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-metrics
+          path: eval_metrics.json
+
+###############################################################################
+# Job 7 — Build & push Docker image to ghcr.io
+###############################################################################
+  build-image:
+    name: "7 · Docker build + push → ghcr.io"
+    runs-on: ubuntu-latest
+    needs: evaluate
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      image:  ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download trained model
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: models/best/
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=pr
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+          provenance: true    # SLSA provenance attestation
+          sbom:       true    # SBOM attestation
+
+###############################################################################
+# Job 8 — Trivy image scan (CVEs + secrets + misconfig)
+###############################################################################
+  scan-image:
+    name: "8 · Security — Trivy image scan"
+    runs-on: ubuntu-latest
+    needs: build-image
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trivy — full vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:latest
+          format:    sarif
+          output:    trivy-results.sarif
+          severity:  CRITICAL,HIGH
+          exit-code: "0"   # report but don't block (change to "1" to enforce)
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Trivy — fail on CRITICAL CVEs with fixes available
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref:      ${{ env.IMAGE_NAME }}:latest
+          format:         table
+          severity:       CRITICAL
+          ignore-unfixed: true
+          exit-code:      "1"
+
+###############################################################################
+# Job 9 — SBOM generation with Syft
+###############################################################################
+  sbom:
+    name: "9 · SBOM — Syft (SPDX-JSON)"
+    runs-on: ubuntu-latest
+    needs: build-image
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image:          ${{ env.IMAGE_NAME }}:latest
+          format:         spdx-json
+          artifact-name:  sbom.spdx.json
+          output-file:    sbom.spdx.json
+
+      - name: Scan SBOM for vulnerabilities with Grype
+        uses: anchore/scan-action@v3
+        with:
+          sbom: sbom.spdx.json
+          fail-build: false   # advisory only
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
+###############################################################################
+# Job 10 — Cosign keyless image signing (Sigstore)
+###############################################################################
+  sign-image:
+    name: "10 · Sign image — Cosign (Sigstore keyless)"
+    runs-on: ubuntu-latest
+    needs: [scan-image, sbom]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign image digest (keyless — OIDC token from GitHub Actions)
+        run: |
+          cosign sign --yes \
+            ${{ env.IMAGE_NAME }}@${{ needs.build-image.outputs.digest }}
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+
+      - name: Verify signature
+        run: |
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}.*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            ${{ env.IMAGE_NAME }}@${{ needs.build-image.outputs.digest }}
+        env:
+          COSIGN_EXPERIMENTAL: "1"
