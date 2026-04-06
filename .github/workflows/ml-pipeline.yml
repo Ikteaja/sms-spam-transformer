@@ -245,7 +245,7 @@ jobs:
 # Job 6 — Evaluate (gate on F1 threshold)
 ###############################################################################
   evaluate:
-    name: "6 · Evaluate — assert F1 >= ${{ env.F1_THRESHOLD }}"
+    name: "6 · Evaluate — assert F1 >= 0.90 (F1_THRESHOLD)"
     runs-on: ubuntu-latest
     needs: train
     steps:
