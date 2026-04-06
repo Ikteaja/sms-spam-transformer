@@ -287,7 +287,8 @@ jobs:
           trainer = Trainer(model=model,
                             args=TrainingArguments(output_dir='models/eval_ci',
                                                    per_device_eval_batch_size=32,
-                                                   report_to='none'))
+                                                   report_to='none',
+                                                   eval_strategy='no'))
           preds  = trainer.predict(ds['val'])
           y_pred = np.argmax(preds.predictions, axis=-1)
           y_true = preds.label_ids

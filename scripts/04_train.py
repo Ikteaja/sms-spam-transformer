@@ -78,12 +78,11 @@ def main():
         learning_rate=args.lr,
         warmup_steps=args.warmup_steps,
         weight_decay=args.weight_decay,
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",  # renamed from evaluation_strategy in transformers 4.46+
         save_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="f1",
         greater_is_better=True,
-        logging_dir=str(MODEL_DIR / "logs"),
         logging_steps=50,
         report_to="none",  # MLflow handled manually below
         seed=42,
