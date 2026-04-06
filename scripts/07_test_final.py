@@ -89,7 +89,7 @@ def main() -> None:
         per_device_eval_batch_size=64,
         report_to="none",
     )
-    trainer = Trainer(model=model, args=eval_args, tokenizer=tokenizer)
+    trainer = Trainer(model=model, args=eval_args, processing_class=tokenizer)
 
     predictions = trainer.predict(ds["test"])
     y_pred = np.argmax(predictions.predictions, axis=-1)
