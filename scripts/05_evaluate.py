@@ -83,7 +83,7 @@ def main() -> None:
     trainer = Trainer(
         model=model,
         args=eval_args,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         compute_metrics=compute_metrics,
     )
 

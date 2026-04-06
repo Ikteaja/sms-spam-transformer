@@ -285,6 +285,7 @@ jobs:
           model = DistilBertForSequenceClassification.from_pretrained('models/best')
           tok   = DistilBertTokenizerFast.from_pretrained('models/best')
           trainer = Trainer(model=model,
+                            processing_class=tok,
                             args=TrainingArguments(output_dir='models/eval_ci',
                                                    per_device_eval_batch_size=32,
                                                    report_to='none',
