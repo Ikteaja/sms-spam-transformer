@@ -14,10 +14,13 @@ import torch
 def test_tokeniser_output_shape():
     """Tokeniser must produce correct tensor shapes."""
     from transformers import DistilBertTokenizerFast
+
     tok = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
     enc = tok(
         ["Free prize now!", "Hey how are you?"],
-        padding="max_length", truncation=True, max_length=128,
+        padding="max_length",
+        truncation=True,
+        max_length=128,
         return_tensors="pt",
     )
     assert enc["input_ids"].shape == (2, 128)
@@ -27,13 +30,15 @@ def test_tokeniser_output_shape():
 def test_model_forward_pass():
     """DistilBERT must produce 2-class logits without error."""
     from transformers import DistilBertForSequenceClassification, DistilBertTokenizerFast
-    tok   = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
+
+    tok = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
     model = DistilBertForSequenceClassification.from_pretrained(
         "distilbert-base-uncased", num_labels=2
     )
     model.eval()
-    enc = tok("test message", return_tensors="pt", truncation=True,
-              padding="max_length", max_length=128)
+    enc = tok(
+        "test message", return_tensors="pt", truncation=True, padding="max_length", max_length=128
+    )
     with torch.no_grad():
         out = model(**enc)
     assert out.logits.shape == (1, 2)
@@ -52,6 +57,7 @@ def test_label_map_valid():
 def test_processed_dataset_splits():
     """Processed dataset must have train/val/test splits."""
     from datasets import load_from_disk
+
     ds_path = Path("data/processed")
     if not ds_path.exists():
         pytest.skip("data/processed not found — run make train first")

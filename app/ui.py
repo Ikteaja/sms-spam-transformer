@@ -21,7 +21,7 @@ from transformers import DistilBertForSequenceClassification, DistilBertTokenize
 # Model loading (shared with main.py when mounted)
 # ---------------------------------------------------------------------------
 _DEFAULT_DIRS = [Path("models/frozen"), Path("models/best")]
-_FALLBACK_HF  = "distilbert-base-uncased"   # downloaded at runtime if no fine-tuned model
+_FALLBACK_HF = "distilbert-base-uncased"  # downloaded at runtime if no fine-tuned model
 
 _model: DistilBertForSequenceClassification = None
 _tokenizer: DistilBertTokenizerFast = None
@@ -39,15 +39,13 @@ def _load():
     chosen = next((p for p in candidates if p.exists()), None)
     if chosen:
         _model_label = f"Fine-tuned · {chosen}"
-        checkpoint   = str(chosen)
+        checkpoint = str(chosen)
     else:
         _model_label = f"Base DistilBERT · {_FALLBACK_HF} (no fine-tuned model found)"
-        checkpoint   = _FALLBACK_HF
+        checkpoint = _FALLBACK_HF
 
     _tokenizer = DistilBertTokenizerFast.from_pretrained(checkpoint)
-    _model     = DistilBertForSequenceClassification.from_pretrained(
-        checkpoint, num_labels=2
-    )
+    _model = DistilBertForSequenceClassification.from_pretrained(checkpoint, num_labels=2)
     _model.eval()
 
 
@@ -60,31 +58,29 @@ def classify(message: str):
         return "⚠️ Please enter a message.", "", ""
 
     enc = _tokenizer(
-        message, return_tensors="pt", truncation=True,
-        padding="max_length", max_length=128,
+        message,
+        return_tensors="pt",
+        truncation=True,
+        padding="max_length",
+        max_length=128,
     )
     with torch.no_grad():
         logits = _model(**enc).logits
     probs = torch.softmax(logits, dim=-1)[0]
     spam_prob = float(probs[1])
-    ham_prob  = float(probs[0])
-    is_spam   = spam_prob > ham_prob
+    ham_prob = float(probs[0])
+    is_spam = spam_prob > ham_prob
 
     # Result badge
     if is_spam:
         badge = f"🚨  SPAM  ({spam_prob:.1%} confidence)"
-        color = "#ff4444"
     else:
         badge = f"✅  HAM — Legitimate  ({ham_prob:.1%} confidence)"
-        color = "#22aa44"
 
     # Confidence breakdown
     bar_spam = "█" * int(spam_prob * 30) + "░" * (30 - int(spam_prob * 30))
-    bar_ham  = "█" * int(ham_prob  * 30) + "░" * (30 - int(ham_prob  * 30))
-    breakdown = (
-        f"SPAM  {bar_spam}  {spam_prob:.1%}\n"
-        f"HAM   {bar_ham}  {ham_prob:.1%}"
-    )
+    bar_ham = "█" * int(ham_prob * 30) + "░" * (30 - int(ham_prob * 30))
+    breakdown = f"SPAM  {bar_spam}  {spam_prob:.1%}\n" f"HAM   {bar_ham}  {ham_prob:.1%}"
 
     explanation = _explain(message, is_spam, spam_prob)
     return badge, breakdown, explanation
@@ -92,13 +88,20 @@ def classify(message: str):
 
 def _explain(text: str, is_spam: bool, confidence: float) -> str:
     import re
+
     signals = []
-    if re.search(r'http|www|\.com', text, re.I):   signals.append("contains a URL")
-    if re.search(r'free|win|prize|cash|award', text, re.I): signals.append("uses prize/money language")
-    if sum(1 for c in text if c.isupper()) / max(len(text), 1) > 0.25: signals.append("heavy use of CAPITALS")
-    if text.count('!') > 1:  signals.append(f"{text.count('!')} exclamation marks")
-    if re.search(r'[£$€]', text): signals.append("contains currency symbols")
-    if re.search(r'\b(urgent|claim|verify|suspended|click)\b', text, re.I): signals.append("urgency/action words")
+    if re.search(r"http|www|\.com", text, re.I):
+        signals.append("contains a URL")
+    if re.search(r"free|win|prize|cash|award", text, re.I):
+        signals.append("uses prize/money language")
+    if sum(1 for c in text if c.isupper()) / max(len(text), 1) > 0.25:
+        signals.append("heavy use of CAPITALS")
+    if text.count("!") > 1:
+        signals.append(f"{text.count('!')} exclamation marks")
+    if re.search(r"[£$€]", text):
+        signals.append("contains currency symbols")
+    if re.search(r"\b(urgent|claim|verify|suspended|click)\b", text, re.I):
+        signals.append("urgency/action words")
 
     if not signals:
         signals_str = "No strong spam signals detected in this message."
@@ -113,7 +116,9 @@ def _explain(text: str, is_spam: bool, confidence: float) -> str:
 # Gradio interface
 # ---------------------------------------------------------------------------
 EXAMPLES = [
-    ["Congratulations! You've WON a FREE iPhone. CLICK HERE to claim your prize now: http://win.com"],
+    [
+        "Congratulations! You've WON a FREE iPhone. CLICK HERE to claim your prize now: http://win.com"
+    ],
     ["Hey, are we still on for dinner tonight? Let me know what time works for you."],
     ["URGENT: Your bank account has been SUSPENDED. Verify now at http://secure-login.biz"],
     ["Can you pick up some milk on your way home? Thanks!"],
@@ -128,11 +133,12 @@ Built with **DistilBERT** transfer learning — fine-tuned on 5,574 real SMS mes
 Type any SMS message below and the model will tell you if it's **spam** or **legitimate (ham)**.
 """
 
+
 def build_interface() -> gr.Blocks:
     with gr.Blocks(
         title="SMS Spam Classifier",
         theme=gr.themes.Soft(primary_hue="blue"),
-        css=".result-box { font-size: 1.3em; font-weight: bold; padding: 12px; border-radius: 8px; }"
+        css=".result-box { font-size: 1.3em; font-weight: bold; padding: 12px; border-radius: 8px; }",
     ) as demo:
         gr.Markdown(DESCRIPTION)
 
@@ -146,7 +152,7 @@ def build_interface() -> gr.Blocks:
                 )
                 with gr.Row():
                     btn_classify = gr.Button("Classify", variant="primary", scale=2)
-                    btn_clear    = gr.Button("Clear", scale=1)
+                    btn_clear = gr.Button("Clear", scale=1)
 
                 gr.Examples(
                     examples=EXAMPLES,
@@ -155,9 +161,9 @@ def build_interface() -> gr.Blocks:
                 )
 
             with gr.Column(scale=1):
-                out_label    = gr.Textbox(label="Result", interactive=False, lines=1)
-                out_bar      = gr.Textbox(label="Confidence breakdown", interactive=False, lines=2)
-                out_explain  = gr.Textbox(label="Why?", interactive=False, lines=3)
+                out_label = gr.Textbox(label="Result", interactive=False, lines=1)
+                out_bar = gr.Textbox(label="Confidence breakdown", interactive=False, lines=2)
+                out_explain = gr.Textbox(label="Why?", interactive=False, lines=3)
 
         btn_classify.click(
             fn=classify,

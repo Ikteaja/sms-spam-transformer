@@ -69,9 +69,7 @@ def load_model():
     _model_path = checkpoint
 
     _tokenizer = DistilBertTokenizerFast.from_pretrained(checkpoint)
-    _model = DistilBertForSequenceClassification.from_pretrained(
-        checkpoint, num_labels=2
-    )
+    _model = DistilBertForSequenceClassification.from_pretrained(checkpoint, num_labels=2)
     _model.eval()
     src = "fine-tuned" if chosen else "HuggingFace hub (no local model found)"
     print(f"Model loaded from: {_model_path}  [{src}]")
@@ -82,6 +80,7 @@ def load_model():
 # ---------------------------------------------------------------------------
 def _build_gradio():
     from app.ui import build_interface
+
     return build_interface()
 
 
@@ -92,7 +91,12 @@ gr.mount_gradio_app(app, _build_gradio(), path="/ui")
 # Schemas
 # ---------------------------------------------------------------------------
 class PredictRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=1600, example="Congratulations! You won a free iPhone. Click here now!")
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=1600,
+        example="Congratulations! You won a free iPhone. Click here now!",
+    )
 
 
 class PredictResponse(BaseModel):

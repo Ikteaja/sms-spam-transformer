@@ -62,7 +62,7 @@ def main():
     pd.set_option("display.width", 200)
     print(f"\n=== Top {len(df)} runs sorted by {args.metric} ===\n")
     print(df.to_string(index=False))
-    print(f"\nMLflow UI: run `mlflow ui` then open http://localhost:5000")
+    print("\nMLflow UI: run `mlflow ui` then open http://localhost:5000")
 
 
 if __name__ == "__main__":
