@@ -1,4 +1,4 @@
-transformers>=4.40.0
+transformers>=4.46.0  # 4.46 renamed evaluation_strategy→eval_strategy, removed logging_dir
 torch>=2.9.0
 datasets>=2.19.0
 scikit-learn>=1.4.2

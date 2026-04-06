@@ -101,7 +101,7 @@ def main():
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         learning_rate=args.lr,
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",  # renamed from evaluation_strategy in transformers 4.46+
         save_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="f1",
