@@ -21,17 +21,25 @@ OUTPUT_CSV = RAW_DIR / "spam.csv"
 
 
 def download_via_kaggle() -> bool:
+    # Check credentials file first — avoids calling the API at all in CI/CD
+    # environments where ~/.kaggle/kaggle.json is absent.
+    kaggle_creds = Path.home() / ".kaggle" / "kaggle.json"
+    if not kaggle_creds.exists():
+        print("No Kaggle credentials found (~/.kaggle/kaggle.json) — skipping Kaggle download.")
+        return False
     try:
         import kaggle  # noqa: F401
 
         print("Kaggle credentials found — downloading via Kaggle API …")
         kaggle.api.authenticate()
         kaggle.api.dataset_download_files(KAGGLE_DATASET, path=str(RAW_DIR), unzip=True)
-        # The Kaggle zip extracts to spam.csv directly
         if OUTPUT_CSV.exists():
             print(f"Saved: {OUTPUT_CSV}")
             return True
-    except Exception as exc:
+    except BaseException as exc:
+        # Catch BaseException (not just Exception) because newer Kaggle CLI
+        # versions call sys.exit(1) on auth failure, raising SystemExit which
+        # is not a subclass of Exception and would bypass the UCI fallback.
         print(f"Kaggle download skipped: {exc}")
     return False
 
