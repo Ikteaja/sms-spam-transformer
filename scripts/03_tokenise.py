@@ -71,7 +71,9 @@ def main() -> None:
 
     print("Loading data …")
     df = load_and_clean(RAW_CSV)
-    print(f"  Total rows: {len(df)}  |  spam: {df['label_id'].sum()}  |  ham: {(df['label_id']==0).sum()}")
+    print(
+        f"  Total rows: {len(df)}  |  spam: {df['label_id'].sum()}  |  ham: {(df['label_id']==0).sum()}"
+    )
 
     print("Splitting 70/15/15 …")
     train_df, val_df, test_df = split(df)

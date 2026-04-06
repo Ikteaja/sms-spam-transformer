@@ -68,8 +68,9 @@ def parse_args():
     p.add_argument("--epochs", type=int, default=3)
     p.add_argument("--batch_size", type=int, default=32)
     p.add_argument("--lr", type=float, default=3e-5)
-    p.add_argument("--num_frozen", type=int, default=5,
-                   help="Number of transformer layers to freeze (0-5)")
+    p.add_argument(
+        "--num_frozen", type=int, default=5, help="Number of transformer layers to freeze (0-5)"
+    )
     return p.parse_args()
 
 
@@ -144,7 +145,9 @@ def main():
             }
         )
 
-        print(f"\nValidation → accuracy: {val_metrics['eval_accuracy']:.4f}  f1: {val_metrics['eval_f1']:.4f}")
+        print(
+            f"\nValidation → accuracy: {val_metrics['eval_accuracy']:.4f}  f1: {val_metrics['eval_f1']:.4f}"
+        )
 
         FROZEN_DIR.mkdir(parents=True, exist_ok=True)
         trainer.save_model(str(FROZEN_DIR))

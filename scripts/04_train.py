@@ -63,9 +63,7 @@ def main():
     ds.set_format("torch", columns=["input_ids", "attention_mask", "labels"])
 
     print(f"Loading model: {CHECKPOINT} …")
-    model = DistilBertForSequenceClassification.from_pretrained(
-        CHECKPOINT, num_labels=2
-    )
+    model = DistilBertForSequenceClassification.from_pretrained(CHECKPOINT, num_labels=2)
     tokenizer = DistilBertTokenizerFast.from_pretrained(CHECKPOINT)
 
     output_dir = MODEL_DIR / "checkpoints"
@@ -87,7 +85,7 @@ def main():
         greater_is_better=True,
         logging_dir=str(MODEL_DIR / "logs"),
         logging_steps=50,
-        report_to="none",       # MLflow handled manually below
+        report_to="none",  # MLflow handled manually below
         seed=42,
     )
 
@@ -136,7 +134,9 @@ def main():
             }
         )
 
-        print(f"\nValidation → accuracy: {val_metrics['eval_accuracy']:.4f}  f1: {val_metrics['eval_f1']:.4f}")
+        print(
+            f"\nValidation → accuracy: {val_metrics['eval_accuracy']:.4f}  f1: {val_metrics['eval_f1']:.4f}"
+        )
 
         # Save best model
         trainer.save_model(str(best_dir))

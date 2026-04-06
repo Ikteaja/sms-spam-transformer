@@ -4,10 +4,8 @@ Uses TestClient (no running server needed).
 The model is loaded from HuggingFace hub if no local model exists.
 """
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -25,6 +23,7 @@ def client():
 
     # Simulate logits: ham=0.1, spam=0.9
     import torch
+
     mock_logits = MagicMock()
     mock_logits.logits = torch.tensor([[0.1, 0.9]])
     mock_model.return_value = mock_logits
@@ -35,7 +34,7 @@ def client():
         "attention_mask": torch.ones(1, 128, dtype=torch.long),
     }
 
-    main_module._model     = mock_model
+    main_module._model = mock_model
     main_module._tokenizer = mock_tokenizer
     main_module._model_path = "mock/model"
 

@@ -3,7 +3,6 @@ Tests for data quality — run in CI after the data download step.
 These tests will SKIP if spam.csv has not been downloaded yet.
 """
 
-import re
 from pathlib import Path
 
 import pandas as pd
