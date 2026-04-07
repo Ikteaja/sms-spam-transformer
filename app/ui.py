@@ -135,11 +135,8 @@ Type any SMS message below and the model will tell you if it's **spam** or **leg
 
 
 def build_interface() -> gr.Blocks:
-    with gr.Blocks(
-        title="SMS Spam Classifier",
-        theme=gr.themes.Soft(primary_hue="blue"),
-        css=".result-box { font-size: 1.3em; font-weight: bold; padding: 12px; border-radius: 8px; }",
-    ) as demo:
+    # theme and css moved to launch() in Gradio 6.0
+    with gr.Blocks(title="SMS Spam Classifier") as demo:
         gr.Markdown(DESCRIPTION)
 
         with gr.Row():
@@ -190,4 +187,9 @@ def build_interface() -> gr.Blocks:
 
 if __name__ == "__main__":
     demo = build_interface()
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=False,
+        theme=gr.themes.Soft(primary_hue="blue"),
+    )
